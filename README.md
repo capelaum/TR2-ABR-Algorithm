@@ -1,4 +1,11 @@
-# pyDash: A Framework Based Educational Tool for Adaptive Streaming Video Algorithms Study
+## ABR algorithm implementation
+
+Developed for educational purposes in the Teleinformatic and Networks 2 discipline of the 
+Computer Enginnering graduate course in University of Brasilia (UnB) - 2021-1.
+
+This project uses [pydash project](https://github.com/mfcaetano/pydash)
+
+## pyDash: A Framework Based Educational Tool for Adaptive Streaming Video Algorithms Study
 
 ![bigbuckbunny](https://user-images.githubusercontent.com/4336448/118493151-2b9fc380-b6f7-11eb-8a25-9134862da754.jpg) A Python Dash Project. 
 
