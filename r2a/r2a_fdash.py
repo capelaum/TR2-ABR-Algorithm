@@ -3,12 +3,13 @@ from player.parser import *
 import time
 from statistics import mean
 
+
 class R2A_FDASH(IR2A):
     def __init__(self, id):
         IR2A.__init__(self, id)
         # guarda qualidades disponíveis
         self.qi = []
-        self.currentQi = 0
+        self.current_qi = 0
 
     def handle_xml_request(self, msg):
         self.request_time = time.perf_counter()
@@ -20,14 +21,14 @@ class R2A_FDASH(IR2A):
         self.send_up(msg)
 
     def handle_segment_size_request(self, msg):
-        bufferTimeHistogram = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        buffer_time_histogram = self.whiteboard.get_playback_segment_size_time_at_buffer()
 
-        if(bufferTimeHistogram.len > 1):
-            bufferingTime = bufferTimeHistogram[-1]
-            differentialBufferingTime = self.lastBufferingTime[-1] - bufferTimeHistogram[-2]
-            # setar self.currentQi usando FDASH e variáveis calculadas
+        if(len(buffer_time_histogram) > 1):
+            buffering_time = buffer_time_histogram[-1]
+            buffering_time_diff = buffering_time - buffer_time_histogram[-2]
+            # setar self.current_qi usando FDASH e variáveis calculadas
 
-        msg.add_quality_id(self.qi[self.currentQi])
+        msg.add_quality_id(self.qi[self.current_qi])
         self.send_down(msg)
 
     def handle_segment_size_response(self, msg):
