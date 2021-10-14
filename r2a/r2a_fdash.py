@@ -16,6 +16,20 @@ class R2A_FDASH(IR2A):
         self.throughputs = []
         self.request_time = 0
 
+        ## Controlador FDASH variables ##
+        
+        # Tempo de buffering Alvo
+        self.T = 20 
+        # Buffering time distance
+        self.buff_time = self.set_buffering_time_membership()
+        # Buffering time difference
+        self.buff_time_diff = self.set_buffering_time_diff_membership()
+        # Diferença entre qualidades
+        self.quality_diff = self.set_quality_diff_membership()
+        self.rules = self.get_controller_rules()
+        self.FDASHControl = ctrl.ControlSystem(self.rules)
+        self.FDASH = ctrl.ControlSystemSimulation(self.FDASHControl)
+
     def handle_xml_request(self, msg):
         self.request_time = time.perf_counter()
         self.send_down(msg)
@@ -31,23 +45,18 @@ class R2A_FDASH(IR2A):
         # MAX BUFFER SIZE = 60
         # SEGMENT SIZE = 1
         # QUALITY ID = [0, 19]
-        target_buffer_time = 35      # Tempo de buffering Alvo
 
         print("-----------------------------------------")
         buffer_time_histogram = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        playback_pauses = self.whiteboard.get_playback_pauses()
         print("HISTOGRAM:", buffer_time_histogram)
-
-        buff_time = self.set_buffering_time_membership(target_buffer_time)
-        buff_time_diff = self.set_buffering_time_diff_membership(target_buffer_time)
-        quality_diff = self.set_quality_diff_membership()
-        rules = self.get_controller_rules(buff_time, buff_time_diff, quality_diff)
-
-        FDASHControl = ctrl.ControlSystem(rules)
-        FDASH = ctrl.ControlSystemSimulation(FDASHControl)
+        print("-----------------------------------------")
+        print("PAUSES:", len(playback_pauses))
+        print("-----------------------------------------")
 
         if(len(buffer_time_histogram) > 1):
-            if len(self.throughputs) >= 60:
-                avg_throughput = mean(self.throughputs[-60:])
+            if len(self.throughputs) >= 10:
+                avg_throughput = mean(self.throughputs[-10:])
             else:
                 avg_throughput = mean(self.throughputs)
 
@@ -55,12 +64,12 @@ class R2A_FDASH(IR2A):
             buffering_time_diff = buffering_time - buffer_time_histogram[-2]
             print("buffering_time_diff = ", buffering_time_diff)
 
-            FDASH.input['buff_time'] = buffering_time
-            FDASH.input['buff_time_diff'] = buffering_time_diff
+            self.FDASH.input['buff_time'] = buffering_time
+            self.FDASH.input['buff_time_diff'] = buffering_time_diff
 
-            FDASH.compute()
+            self.FDASH.compute()
 
-            factor = FDASH.output['quality_diff']
+            factor = self.FDASH.output['quality_diff']
             print("Output: fator de acréscimo/decréscimo =", factor)
 
             # Pegar a ultima qualidade selecionada e multiplicar por factor
@@ -97,16 +106,18 @@ class R2A_FDASH(IR2A):
     def finalization(self):
         pass
 
-    def set_buffering_time_membership(self, T):
+    def set_buffering_time_membership(self):
+        T = self.T
         buff_time = ctrl.Antecedent(np.arange(0, 5*T, 1), 'buff_time')
 
-        # Diferença entre tempo de buffering atual com um valor alvo T = 35s
+        # Diferença entre tempo de buffering atual com um valor alvo T
         buff_time['S'] = fuzz.trapmf(buff_time.universe, [0, 0, (2*T/3), T])
         buff_time['C'] = fuzz.trapmf(buff_time.universe, [(2*T/3), T, T, 4*T])
         buff_time['L'] = fuzz.trapmf(buff_time.universe, [T, 4*T, 5*T, 5*T])
         return buff_time
 
-    def set_buffering_time_diff_membership(self, T):
+    def set_buffering_time_diff_membership(self):
+        T = self.T
         buff_time_diff = ctrl.Antecedent(np.arange(-T, 5*T, 1), 'buff_time_diff')
 
         # Comportamento da taxa de transferência entre tempos de buffering consecutivos
@@ -130,19 +141,20 @@ class R2A_FDASH(IR2A):
         quality_diff['NC'] = fuzz.trapmf(quality_diff.universe, [N1, Z, Z, P1])
         quality_diff['SI'] = fuzz.trapmf(quality_diff.universe, [Z, P1, P1, P2])
         quality_diff['I'] = fuzz.trapmf(quality_diff.universe, [P1, P2, 2, 2])
+
         return quality_diff
 
-    def get_controller_rules(self, buff_time, buff_time_diff, quality_diff):
-        rule1 = ctrl.Rule(buff_time['S'] & buff_time_diff['F'], quality_diff['R'])
-        rule2 = ctrl.Rule(buff_time['C'] & buff_time_diff['F'], quality_diff['SR'])
-        rule3 = ctrl.Rule(buff_time['L'] & buff_time_diff['F'], quality_diff['NC'])
+    def get_controller_rules(self):
+        rule2 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['F'], self.quality_diff['SR'])
+        rule1 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['F'], self.quality_diff['R'])
+        rule3 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['F'], self.quality_diff['NC'])
 
-        rule4 = ctrl.Rule(buff_time['S'] & buff_time_diff['S'], quality_diff['SR'])
-        rule5 = ctrl.Rule(buff_time['C'] & buff_time_diff['S'], quality_diff['NC'])
-        rule6 = ctrl.Rule(buff_time['L'] & buff_time_diff['S'], quality_diff['SI'])
+        rule5 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['S'], self.quality_diff['NC'])
+        rule6 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['S'], self.quality_diff['SI'])
+        rule4 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['S'], self.quality_diff['SR'])
 
-        rule7 = ctrl.Rule(buff_time['S'] & buff_time_diff['R'], quality_diff['NC'])
-        rule8 = ctrl.Rule(buff_time['C'] & buff_time_diff['R'], quality_diff['SI'])
-        rule9 = ctrl.Rule(buff_time['L'] & buff_time_diff['R'], quality_diff['I'])
+        rule7 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['R'], self.quality_diff['NC'])
+        rule8 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['R'], self.quality_diff['SI'])
+        rule9 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['R'], self.quality_diff['I'])
 
         return [rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9]
