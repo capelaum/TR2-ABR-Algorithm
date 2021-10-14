@@ -31,24 +31,25 @@ class R2A_FDASH(IR2A):
         # MAX BUFFER SIZE = 60
         # SEGMENT SIZE = 1
         # QUALITY ID = [0, 19]
-        target_buffer_time = 1      # Tempo de buffering Alvo
+        target_buffer_time = 35      # Tempo de buffering Alvo
 
         print("-----------------------------------------")
         buffer_time_histogram = self.whiteboard.get_playback_segment_size_time_at_buffer()
         print("HISTOGRAM:", buffer_time_histogram)
 
         buff_time = self.set_buffering_time_membership(target_buffer_time)
-        buff_time_diff = self.set_buffering_time_diff_membership(
-            target_buffer_time)
+        buff_time_diff = self.set_buffering_time_diff_membership(target_buffer_time)
         quality_diff = self.set_quality_diff_membership()
-        rules = self.get_controller_rules(
-            buff_time, buff_time_diff, quality_diff)
+        rules = self.get_controller_rules(buff_time, buff_time_diff, quality_diff)
 
         FDASHControl = ctrl.ControlSystem(rules)
         FDASH = ctrl.ControlSystemSimulation(FDASHControl)
 
         if(len(buffer_time_histogram) > 1):
-            avg_throughput = mean(self.throughputs)
+            if len(self.throughputs) >= 60:
+                avg_throughput = mean(self.throughputs[-60:])
+            else:
+                avg_throughput = mean(self.throughputs)
 
             buffering_time = buffer_time_histogram[-1]
             buffering_time_diff = buffering_time - buffer_time_histogram[-2]
@@ -69,7 +70,7 @@ class R2A_FDASH(IR2A):
             print(f"CURRENT QUALITY ID: {current_quality_id}bps")
             print(f"DESIRED QUALITY ID: {desired_quality_id}bps")
 
-            # Descobrir menor qualidade mais proximo de: factor vezes a ultima qualidade selecionada
+            # Descobrir menor qualidade mais proximo de: fator vezes a media dos throughtputs
             for i in range(len(self.qi)):
                 if desired_quality_id >= self.qi[i]:
                     self.current_qi = i
@@ -80,7 +81,7 @@ class R2A_FDASH(IR2A):
         msg.add_quality_id(self.qi[self.current_qi])
 
         print("SEGMENT ID:", msg.get_segment_id())
-        print(f"CHOSEN QUALITY ID: {msg.get_quality_id()}bps")
+        print(f"CHOSEN QUALITY: {msg.get_quality_id()}bps")
 
         self.send_down(msg)
 
@@ -106,17 +107,12 @@ class R2A_FDASH(IR2A):
         return buff_time
 
     def set_buffering_time_diff_membership(self, T):
-        buff_time_diff = ctrl.Antecedent(
-            np.arange(-T, 5*T, 1), 'buff_time_diff')
+        buff_time_diff = ctrl.Antecedent(np.arange(-T, 5*T, 1), 'buff_time_diff')
 
         # Comportamento da taxa de transferência entre tempos de buffering consecutivos
-        buff_time_diffUniverse = buff_time_diff.universe
-        buff_time_diff['F'] = fuzz.trapmf(
-            buff_time_diffUniverse, [-T, -T, (-2*T/3), 0])
-        buff_time_diff['S'] = fuzz.trapmf(
-            buff_time_diffUniverse, [(-2*T/3), 0, 0, 5*T])
-        buff_time_diff['R'] = fuzz.trapmf(
-            buff_time_diffUniverse, [0, 4*T, 5*T, 5*T])
+        buff_time_diff['F'] = fuzz.trapmf(buff_time_diff.universe, [-T, -T, (-2*T/3), 0])
+        buff_time_diff['S'] = fuzz.trapmf(buff_time_diff.universe, [(-2*T/3), 0, 0, 5*T])
+        buff_time_diff['R'] = fuzz.trapmf(buff_time_diff.universe, [0, 4*T, 5*T, 5*T])
         return buff_time_diff
 
     def set_quality_diff_membership(self):
@@ -126,15 +122,14 @@ class R2A_FDASH(IR2A):
         N1 = 0.5    # Reduzir pouco - SR
         Z = 1       # Não alterar - NC
         P1 = 1.5    # Aumentar pouco - SI
-        P2 = 2      # Aumenta - I
+        P2 = 2      # Aumentar - I
 
         # Fator de incremento/decremento da qualidade do próximo segmento
-        quality_diffUniverse = quality_diff.universe
-        quality_diff['R'] = fuzz.trapmf(quality_diffUniverse, [0, 0, N2, N1])
-        quality_diff['SR'] = fuzz.trapmf(quality_diffUniverse, [N2, N1, N1, Z])
-        quality_diff['NC'] = fuzz.trapmf(quality_diffUniverse, [N1, Z, Z, P1])
-        quality_diff['SI'] = fuzz.trapmf(quality_diffUniverse, [Z, P1, P1, P2])
-        quality_diff['I'] = fuzz.trapmf(quality_diffUniverse, [P1, P2, 2, 2])
+        quality_diff['R'] = fuzz.trapmf(quality_diff.universe, [0, 0, N2, N1])
+        quality_diff['SR'] = fuzz.trapmf(quality_diff.universe, [N2, N1, N1, Z])
+        quality_diff['NC'] = fuzz.trapmf(quality_diff.universe, [N1, Z, Z, P1])
+        quality_diff['SI'] = fuzz.trapmf(quality_diff.universe, [Z, P1, P1, P2])
+        quality_diff['I'] = fuzz.trapmf(quality_diff.universe, [P1, P2, 2, 2])
         return quality_diff
 
     def get_controller_rules(self, buff_time, buff_time_diff, quality_diff):
