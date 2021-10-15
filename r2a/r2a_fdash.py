@@ -1,18 +1,35 @@
 from r2a.ir2a import IR2A
 from player.parser import *
-import time
 from statistics import mean
+from skfuzzy import control as ctrl
+import time
+import numpy as np
+import skfuzzy as fuzz
 
 
 class R2A_FDASH(IR2A):
     def __init__(self, id):
         IR2A.__init__(self, id)
-        # guarda qualidades disponíveis
         self.qi = []
-        self.current_qi = 0
+        self.throughputs = []
+        self.request_time = 0
+        self.current_qi_index = 0
+        self.d = 60
+
+        # Tempo de buffering Alvo
+        self.T = 35
+        # Buffering time distance
+        self.set_buffering_time_membership()
+        # Buffering time difference
+        self.set_buffering_time_diff_membership()
+        # Diferença entre qualidades
+        self.set_quality_diff_membership()
+        # Configura controlador
+        self.set_controller_rules()
+        self.FDASHControl = ctrl.ControlSystem(self.rules)
+        self.FDASH = ctrl.ControlSystemSimulation(self.FDASHControl)
 
     def handle_xml_request(self, msg):
-        self.request_time = time.perf_counter()
         self.send_down(msg)
 
     def handle_xml_response(self, msg):
@@ -21,18 +38,137 @@ class R2A_FDASH(IR2A):
         self.send_up(msg)
 
     def handle_segment_size_request(self, msg):
-        buffer_time_histogram = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        pbs = self.whiteboard.get_playback_buffer_size()
 
-        if(len(buffer_time_histogram) > 1):
-            buffering_time = buffer_time_histogram[-1]
-            buffering_time_diff = buffering_time - buffer_time_histogram[-2]
-            # setar self.current_qi usando FDASH e variáveis calculadas
+        if(len(pbt) > 1):
+            self.print_info()
+            if len(self.throughputs) >= 10:
+                avg_throughput = mean(self.throughputs[-10:][0])
+            else:
+                avg_throughput = mean(x[0] for x in self.throughputs)
 
-        msg.add_quality_id(self.qi[self.current_qi])
+            buffering_time = pbt[-1]
+            buffering_time_diff = buffering_time - pbt[-2]
+            print("buffering_time_diff = ", buffering_time_diff)
+
+            self.FDASH.input['buff_time'] = buffering_time
+            self.FDASH.input['buff_time_diff'] = buffering_time_diff
+            self.FDASH.compute()
+
+            factor = self.FDASH.output['quality_diff']
+            print(">>>>> Fator de acréscimo/decréscimo =", factor)
+
+            current_quality_id = self.qi[self.current_qi_index]
+            print(f"CURRENT QUALITY ID: {current_quality_id}bps")
+
+            # Pegar a media dos k ultimos throughtputs e multiplicar por fator
+            desired_quality_id = avg_throughput * factor
+            print(f"DESIRED QUALITY ID: {int(desired_quality_id)}bps")
+
+            # Descobrir menor qualidade mais proximo de: fator vezes a media dos throughtputs
+            for i in range(len(self.qi)):
+                if desired_quality_id >= self.qi[i]:
+                    self.current_qi_index = i
+                else:
+                    break
+
+        # Nos primeiros segmentos, escolher a menor qualidade possível?
+        # TODO problema: ele faz uns ~20 segmentos até calcular 2 valores de buffer time
+        msg.add_quality_id(self.qi[self.current_qi_index])
+
+        print("SEGMENT ID:", msg.get_segment_id())
+        print(f"CHOSEN QUALITY: {msg.get_quality_id()}bps")
+
+        self.request_time = time.perf_counter()
         self.send_down(msg)
 
     def handle_segment_size_response(self, msg):
+        t = time.perf_counter() - self.request_time
+        self.throughputs.insert(0, (msg.get_bit_length() / t, time.perf_counter()))
         self.send_up(msg)
+
+    def print_info(self):
+        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        playback_pauses = self.whiteboard.get_playback_pauses()
+        pbs = self.whiteboard.get_playback_buffer_size()
+
+        print("-----------------------------------------")
+        # print(f"THROUGHPUTS: {self.throughputs}")
+        print(f"# THROUGHPUTS: {len(self.throughputs)}")
+        print(f"AVG THROUGHPUTS: {int(mean(x[0] for x in self.throughputs))} Mbps")
+        print("-----------------------------------------")
+        # print(f"BUFFER TIMES: {pbt}")
+        print(f"# BUFFER TIME: {len(pbt)}")
+        if len(pbt) > 1:
+            print(f"AVG BUFFER TIME: {int(mean(pbt))}s")
+        print("-----------------------------------------")
+        print("PAUSES:", len(playback_pauses))
+        print("-----------------------------------------")
+        # print("BUFFER SIZES:", pbs)
+        print("# BUFFER SIZE:", len(pbs))
+        print(f"AVG BUFFER SIZE: {int(mean(x[1] for x in pbs))}")
+        print("-----------------------------------------")
+
+    def get_rd(self):
+        current_time = time.perf_counter()
+        while (current_time - self.throughputs[-1][1] > self.d):
+            self.throughputs.pop(-1)
+
+        rd = mean(x[0] for x in self.throughputs)
+        # print("RD:", rd)
+        return rd
+
+    def set_buffering_time_membership(self):
+        T = self.T
+        buff_time = ctrl.Antecedent(np.arange(0, 4*T, 1), 'buff_time')
+
+        # Diferença entre tempo de buffering atual com um valor alvo T
+        buff_time['S'] = fuzz.trapmf(buff_time.universe, [0, 0, (2*T/3), T])
+        buff_time['C'] = fuzz.trimf(buff_time.universe, [(2*T/3), T, 4*T])
+        buff_time['L'] = fuzz.trimf(buff_time.universe, [T, 4*T, 5*T])
+        self.buff_time = buff_time
+
+    def set_buffering_time_diff_membership(self):
+        T = self.T
+        buff_time_diff = ctrl.Antecedent(np.arange(-T, 4*T, 1), 'buff_time_diff')
+
+        # Diferencial da taxa de transferência entre os 2 ultimos tempos de buffering
+        buff_time_diff['F'] = fuzz.trapmf(buff_time_diff.universe, [-T, -T, (-2*T/3), 0])
+        buff_time_diff['S'] = fuzz.trimf(buff_time_diff.universe, [(-2*T/3), 0, 5*T])
+        buff_time_diff['R'] = fuzz.trimf(buff_time_diff.universe, [0, 4*T, 5*T])
+        self.buff_time_diff = buff_time_diff
+
+    def set_quality_diff_membership(self):
+        # Fator de qualidade varia de 0 a 2, com precisão de 0.01
+        quality_diff = ctrl.Consequent(np.arange(0, 2.05, 0.05), 'quality_diff')
+        N2 = 0.25   # Reduzir - R
+        N1 = 0.5    # Reduzir pouco - SR
+        Z = 1       # Não alterar - NC
+        P1 = 1.5    # Aumentar pouco - SI
+        P2 = 2      # Aumentar - I
+
+        # Fator de incremento/decremento da qualidade do próximo segmento
+        quality_diff['R'] = fuzz.trapmf(quality_diff.universe, [0, 0, N2, N1])
+        quality_diff['SR'] = fuzz.trimf(quality_diff.universe, [N2, N1, Z])
+        quality_diff['NC'] = fuzz.trimf(quality_diff.universe, [N1, Z, P1])
+        quality_diff['SI'] = fuzz.trimf(quality_diff.universe, [Z, P1, P2])
+        quality_diff['I'] = fuzz.trimf(quality_diff.universe, [P1, P2, P2])
+        self.quality_diff = quality_diff
+
+    def set_controller_rules(self):
+        rule1 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['F'], self.quality_diff['R'])
+        rule2 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['F'], self.quality_diff['SR'])
+        rule3 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['F'], self.quality_diff['NC'])
+
+        rule4 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['S'], self.quality_diff['SR'])
+        rule5 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['S'], self.quality_diff['NC'])
+        rule6 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['S'], self.quality_diff['SI'])
+
+        rule7 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['R'], self.quality_diff['NC'])
+        rule8 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['R'], self.quality_diff['SI'])
+        rule9 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['R'], self.quality_diff['I'])
+        self.rules = [rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9]
 
     def initialize(self):
         pass
