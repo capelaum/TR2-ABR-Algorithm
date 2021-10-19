@@ -15,6 +15,7 @@ class R2A_FDASH_2(IR2A):
         self.request_time = 0
         self.current_qi_index = 0
         self.smooth_troughput = None
+        self.d = 30
 
         self.buff_sizes = [0]
         self.buff_size_danger = 10
@@ -48,11 +49,13 @@ class R2A_FDASH_2(IR2A):
         self.buff_sizes.append(self.whiteboard.get_amount_video_to_play())
         # pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
         # pbs = self.whiteboard.get_playback_buffer_size()
-        # self.update_troughputs()
         # self.print_throughputs()
         # self.update_troughputs()
+        print("-----------------------------------------")
 
         avg_throughput = mean(self.throughputs[:][0])
+        print(f"AVG THROUGHPUT: {avg_throughput} bps")
+
         if self.smooth_troughput is None:
             self.smooth_troughput = self.throughputs[-1][0]
         self.smooth_troughput = 0.2 * self.smooth_troughput + 0.8 * avg_throughput
@@ -91,6 +94,7 @@ class R2A_FDASH_2(IR2A):
         print("PAUSES:", len(playback_pauses))
         print("SEGMENT ID:", msg.get_segment_id())
         print(f"CHOSEN QUALITY: {msg.get_quality_id()}bps")
+        print("-----------------------------------------")
 
         self.request_time = time.perf_counter()
         self.send_down(msg)
@@ -99,6 +103,11 @@ class R2A_FDASH_2(IR2A):
         t = time.perf_counter() - self.request_time
         self.throughputs.append((msg.get_bit_length() / t, time.perf_counter()))
         self.send_up(msg)
+
+    def update_troughputs(self):
+        current_time = time.perf_counter()
+        while (current_time - self.throughputs[0][1] > self.d):
+            self.throughputs.pop(0)
 
     def get_selected_qi(self, desired_quality_id):
         selected_qi = self.qi[0]
@@ -193,48 +202,53 @@ class R2A_FDASH_2(IR2A):
         self.factor = factor
 
     def set_controller_rules(self):
+        buff_size = self.buff_size
+        buff_size_diff = self.buff_size_diff
+        rate = self.rate
+        factor = self.factor
         # Buffer Dangerous
-        rule1 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.rate['L'], self.factor['R'])
-        rule2 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.rate['S'], self.factor['R'])
-        rule3 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.rate['H'], self.factor['R'])
+        rule1 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['L'], factor['R'])
+        rule2 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['S'], factor['R'])
+        rule3 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['H'], factor['R'])
 
-        rule4 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.rate['L'], self.factor['R'])
-        rule5 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.rate['S'], self.factor['SR'])
-        rule6 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.rate['H'], self.factor['SR'])
+        rule4 = ctrl.Rule(buff_size['D'] & buff_size_diff['S'] & rate['L'], factor['R'])
+        rule5 = ctrl.Rule(buff_size['D'] & buff_size_diff['S'] & rate['S'], factor['SR'])
+        rule6 = ctrl.Rule(buff_size['D'] & buff_size_diff['S'] & rate['H'], factor['SR'])
 
-        rule7 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.rate['L'], self.factor['R'])
-        rule8 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.rate['S'], self.factor['SR'])
-        rule9 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['SR'])
+        rule7 = ctrl.Rule(buff_size['D'] & buff_size_diff['R'] & rate['L'], factor['R'])
+        rule8 = ctrl.Rule(buff_size['D'] & buff_size_diff['R'] & rate['S'], factor['SR'])
+        rule9 = ctrl.Rule(buff_size['D'] & buff_size_diff['R'] & rate['H'], factor['SR'])
 
         # Buffer Low
-        rule10 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.rate['L'], self.factor['SR'])
-        rule11 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.rate['S'], self.factor['NC'])
-        rule12 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.rate['H'], self.factor['NC'])
+        rule10 = ctrl.Rule(buff_size['L'] & buff_size_diff['F'] & rate['L'], factor['SR'])
+        rule11 = ctrl.Rule(buff_size['L'] & buff_size_diff['F'] & rate['S'], factor['NC'])
+        rule12 = ctrl.Rule(buff_size['L'] & buff_size_diff['F'] & rate['H'], factor['NC'])
 
-        rule13 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.rate['L'], self.factor['NC'])
-        rule14 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.rate['S'], self.factor['NC'])
-        rule15 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.rate['H'], self.factor['NC'])
+        rule13 = ctrl.Rule(buff_size['L'] & buff_size_diff['S'] & rate['L'], factor['NC'])
+        rule14 = ctrl.Rule(buff_size['L'] & buff_size_diff['S'] & rate['S'], factor['NC'])
+        rule15 = ctrl.Rule(buff_size['L'] & buff_size_diff['S'] & rate['H'], factor['NC'])
 
-        rule16 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.rate['L'], self.factor['NC'])
-        rule17 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.rate['S'], self.factor['NC'])
-        rule18 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['SI'])
+        rule16 = ctrl.Rule(buff_size['L'] & buff_size_diff['R'] & rate['L'], factor['NC'])
+        rule17 = ctrl.Rule(buff_size['L'] & buff_size_diff['R'] & rate['S'], factor['NC'])
+        rule18 = ctrl.Rule(buff_size['L'] & buff_size_diff['R'] & rate['H'], factor['SI'])
 
         # Buffer Safe
-        rule19 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.rate['L'], self.factor['SI'])
-        rule20 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.rate['S'], self.factor['SI'])
-        rule21 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.rate['H'], self.factor['I'])
+        rule19 = ctrl.Rule(buff_size['S'] & buff_size_diff['F'] & rate['L'], factor['SI'])
+        rule20 = ctrl.Rule(buff_size['S'] & buff_size_diff['F'] & rate['S'], factor['SI'])
+        rule21 = ctrl.Rule(buff_size['S'] & buff_size_diff['F'] & rate['H'], factor['I'])
 
-        rule22 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.rate['L'], self.factor['SI'])
-        rule23 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.rate['S'], self.factor['SI'])
-        rule24 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.rate['H'], self.factor['I'])
+        rule22 = ctrl.Rule(buff_size['S'] & buff_size_diff['S'] & rate['L'], factor['SI'])
+        rule23 = ctrl.Rule(buff_size['S'] & buff_size_diff['S'] & rate['S'], factor['SI'])
+        rule24 = ctrl.Rule(buff_size['S'] & buff_size_diff['S'] & rate['H'], factor['I'])
 
-        rule25 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['I'])
-        rule26 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['I'])
+        rule25 = ctrl.Rule(buff_size['S'] & buff_size_diff['R'] & rate['L'], factor['SI'])
+        rule26 = ctrl.Rule(buff_size['S'] & buff_size_diff['R'] & rate['S'], factor['I'])
+        rule27 = ctrl.Rule(buff_size['S'] & buff_size_diff['R'] & rate['H'], factor['I'])
 
         self.rules = [
             rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9,
             rule10, rule11, rule12, rule13, rule14, rule15, rule16, rule17, rule18,
-            rule19, rule20, rule21, rule22, rule23, rule24, rule25, rule26
+            rule19, rule20, rule21, rule22, rule23, rule24, rule25, rule26, rule27
         ]
 
     def initialize(self):
