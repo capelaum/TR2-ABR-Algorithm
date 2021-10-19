@@ -6,16 +6,16 @@ import time
 import numpy as np
 import skfuzzy as fuzz
 
-
 class R2A_FDASH(IR2A):
     def __init__(self, id):
         IR2A.__init__(self, id)
         self.qi = []
         self.throughputs = []
         self.request_time = 0
-        self.current_qi_index = 0
-        self.d = 5
+        self.current_qi_index = 5
 
+        # Tempo usado para estimar throughput da conexão
+        self.d = 60
         # Tempo de buffering Alvo
         self.T = 35
         # Buffering time distance
@@ -42,15 +42,14 @@ class R2A_FDASH(IR2A):
         pbs = self.whiteboard.get_playback_buffer_size()
 
         if(len(pbt) > 1):
-            # self.update_troughputs()
-            if len(self.throughputs) >= 5:
-                avg_throughput = mean(self.throughputs[-5:][0])
-            else:
-                avg_throughput = mean(x[0] for x in self.throughputs)
+            self.update_troughputs()
+            avg_throughput = mean(x[0] for x in self.throughputs)
+
             print("-----------------------------------------")
 
             buffering_time = pbt[-1]
             buffering_time_diff = buffering_time - pbt[-2]
+            print("buffering_time = ", buffering_time)
             print("buffering_time_diff = ", buffering_time_diff)
 
             self.FDASH.input['buff_time'] = buffering_time
@@ -120,39 +119,40 @@ class R2A_FDASH(IR2A):
 
     def set_buffering_time_membership(self):
         T = self.T
-        buff_time = ctrl.Antecedent(np.arange(0, 4*T+1, 1), 'buff_time')
+        buff_time = ctrl.Antecedent(np.arange(0, 5*T+0.01, 0.01), 'buff_time')
 
         # Diferença entre tempo de buffering atual com um valor alvo T
         buff_time['S'] = fuzz.trapmf(buff_time.universe, [0, 0, (2*T/3), T])
         buff_time['C'] = fuzz.trimf(buff_time.universe, [(2*T/3), T, 4*T])
-        buff_time['L'] = fuzz.trimf(buff_time.universe, [T, 4*T, 4*T])
+        buff_time['L'] = fuzz.trapmf(buff_time.universe, [T, 4*T, np.inf,np.inf])
         self.buff_time = buff_time
 
     def set_buffering_time_diff_membership(self):
         T = self.T
-        buff_time_diff = ctrl.Antecedent(np.arange(-T, 4*T+1, 1), 'buff_time_diff')
+        buff_time_diff = ctrl.Antecedent(np.arange(-T, 5*T+0.01, 0.01), 'buff_time_diff')
 
         # Diferencial da taxa de transferência entre os 2 ultimos tempos de buffering
         buff_time_diff['F'] = fuzz.trapmf(buff_time_diff.universe, [-T, -T, (-2*T/3), 0])
         buff_time_diff['S'] = fuzz.trimf(buff_time_diff.universe, [(-2*T/3), 0, 4*T])
-        buff_time_diff['R'] = fuzz.trimf(buff_time_diff.universe, [0, 4*T, 4*T])
+        buff_time_diff['R'] = fuzz.trapmf(buff_time_diff.universe, [0, 4*T, np.inf,np.inf])
         self.buff_time_diff = buff_time_diff
 
     def set_quality_diff_membership(self):
-        # Fator de qualidade varia de 0 a 2, com precisão de 0.01
-        quality_diff = ctrl.Consequent(np.arange(0, 2.05, 0.05), 'quality_diff')
         N2 = 0.25   # Reduzir - R
         N1 = 0.5    # Reduzir pouco - SR
         Z = 1       # Não alterar - NC
         P1 = 1.5    # Aumentar pouco - SI
         P2 = 2      # Aumentar - I
 
+        # Fator de qualidade varia de 0 a 2, com precisão de 0.01
+        quality_diff = ctrl.Consequent(np.arange(0, P2 + 0.5, 0.01), 'quality_diff')
+
         # Fator de incremento/decremento da qualidade do próximo segmento
         quality_diff['R'] = fuzz.trapmf(quality_diff.universe, [0, 0, N2, N1])
         quality_diff['SR'] = fuzz.trimf(quality_diff.universe, [N2, N1, Z])
         quality_diff['NC'] = fuzz.trimf(quality_diff.universe, [N1, Z, P1])
         quality_diff['SI'] = fuzz.trimf(quality_diff.universe, [Z, P1, P2])
-        quality_diff['I'] = fuzz.trimf(quality_diff.universe, [P1, P2, P2])
+        quality_diff['I'] = fuzz.trapmf(quality_diff.universe, [P1, P2, np.inf,np.inf])
         self.quality_diff = quality_diff
 
     def set_controller_rules(self):
