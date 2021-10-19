@@ -17,14 +17,10 @@ class R2A_FDASH_2(IR2A):
         self.smooth_troughput = None
         self.d = 30
 
-        self.p_max = 45
-        self.buffer_size_danger = 15
         self.buffer_sizes = [0]
-        self.max_buffer_size = self.whiteboard.get_max_buffer_size()
+        self.buff_size_danger = 15
+        self.buff_max = self.whiteboard.get_max_buffer_size()
 
-        # Tempo de buffering Alvo
-        self.T = 35
-        self.b_danger = 3
         # Buffering size
         self.set_buffering_size_membership()
         # Buffering size difference
@@ -51,22 +47,22 @@ class R2A_FDASH_2(IR2A):
 
     def handle_segment_size_request(self, msg):
         self.buffer_sizes.append(self.whiteboard.get_amount_video_to_play())
-        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
-        pbs = self.whiteboard.get_playback_buffer_size()
+        # pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        # pbs = self.whiteboard.get_playback_buffer_size()
         # self.update_troughputs()
         # self.print_throughputs()
+        # self.update_troughputs()
 
         # self.print_buffer_times()
         # self.print_buffer_sizes()
-        if len(self.throughputs) >= 5:
-            avg_throughput = mean(self.throughputs[-5:][0])
+        if len(self.throughputs) >= 10:
+            avg_throughput = mean(self.throughputs[-10:][0]) / 2
         else:
-            avg_throughput = mean(self.throughputs[:][0])
+            avg_throughput = mean(self.throughputs[:][0]) / 2
 
         if self.smooth_troughput is None:
             self.smooth_troughput = self.throughputs[-1][0]
-
-        self.smooth_troughput = 0.2 * self.smooth_troughput + 0.8 * self.throughputs[-1][0]
+        self.smooth_troughput = 0.2 * self.smooth_troughput + 0.8 * avg_throughput
 
         current_buffer_size = self.whiteboard.get_amount_video_to_play()
         buffering_size_diff = self.buffer_sizes[-1] - self.buffer_sizes[-2]
@@ -74,7 +70,7 @@ class R2A_FDASH_2(IR2A):
 
         self.FDASH.input['buff_size'] = current_buffer_size
         self.FDASH.input['buff_size_diff'] = buffering_size_diff
-        self.FDASH.input['bit_rate'] = self.smooth_troughput / self.qi[self.current_qi_index]
+        self.FDASH.input['rate'] = avg_throughput / self.qi[self.current_qi_index]
         self.FDASH.compute()
 
         factor = self.FDASH.output['factor']
@@ -90,11 +86,11 @@ class R2A_FDASH_2(IR2A):
         predicted_buff_size = current_buffer_size + (self.smooth_troughput / desired_quality_id) - 1
 
         if desired_quality_id > current_quality_id:
-            if current_buffer_size <= self.buffer_size_danger:
+            if current_buffer_size <= self.buff_size_danger:
                 desired_quality_id = current_quality_id
 
         if desired_quality_id < current_quality_id:
-            if(predicted_buff_size >= self.max_buffer_size / 2):
+            if(predicted_buff_size >= self.buff_max / 2):
                 desired_quality_id = current_quality_id
 
         # Descobrir maior qualidade mais proximo da qualidade desejada
@@ -149,91 +145,89 @@ class R2A_FDASH_2(IR2A):
             self.throughputs.pop(0)
 
     def set_buffering_size_membership(self):
-        T = self.T
-        b_danger = self.b_danger
-        buff_size = ctrl.Antecedent(np.arange(0, 3*self.max_buffer_size/4+0.5, 0.5), 'buff_size')
+        buff_size_danger = self.buff_size_danger
+        buff_max = self.buff_max
+        buff_size = ctrl.Antecedent(np.arange(0, buff_max+0.1, 0.1), 'buff_size')
 
         # Buffer Size
-        buff_size['D'] = fuzz.trapmf(buff_size.universe, [0, 0, b_danger, self.max_buffer_size/2])
-        buff_size['L'] = fuzz.trimf(buff_size.universe, [b_danger, self.p_max/2, 3*self.max_buffer_size/4])
-        buff_size['S'] = fuzz.trimf(buff_size.universe, [self.p_max/2, 3*self.max_buffer_size/4,  3*self.max_buffer_size/4])
+        buff_size['D'] = fuzz.trapmf(buff_size.universe, [0, 0, buff_size_danger, buff_max/2])
+        buff_size['L'] = fuzz.trimf(buff_size.universe, [buff_size_danger, buff_max/2, 3*buff_max/4])
+        buff_size['S'] = fuzz.trapmf(buff_size.universe, [buff_max/2, 3*buff_max/4, np.inf, np.inf])
         self.buff_size = buff_size
 
     def set_buffering_size_diff_membership(self):
-        T = self.T
-        b_danger = self.b_danger
-        buff_size_diff = ctrl.Antecedent(np.arange(-3, 3, 1), 'buff_size_diff')
+        buff_size_diff = ctrl.Antecedent(np.arange(-3, 3.1, 0.1), 'buff_size_diff')
 
         # Diferencial do Buffer Sizer
         buff_size_diff['F'] = fuzz.trapmf(buff_size_diff.universe, [-3, -3, -2, 0])
         buff_size_diff['S'] = fuzz.trimf(buff_size_diff.universe, [-2, 0, 2])
-        buff_size_diff['R'] = fuzz.trimf(buff_size_diff.universe, [0, 2, 2])
+        buff_size_diff['R'] = fuzz.trapmf(buff_size_diff.universe, [0, 2, np.inf, np.inf])
         self.buff_size_diff = buff_size_diff
 
     def set_rate_membership(self):
-        bit_rate = ctrl.Antecedent(np.arange(0, 2.2, 0.2), 'bit_rate')
+        rate = ctrl.Antecedent(np.arange(0, 2.6, 0.1), 'rate')
 
         # Taxa de bits
-        bit_rate['L'] = fuzz.trapmf(bit_rate.universe, [0, 0, 0.8, 1.2])
-        bit_rate['S'] = fuzz.trimf(bit_rate.universe, [0.8, 1.2, 2])
-        bit_rate['H'] = fuzz.trimf(bit_rate.universe, [1.2, 2, 2])
-        self.bit_rate = bit_rate
+        rate['L'] = fuzz.trapmf(rate.universe, [0, 0, 0.8, 1.2])
+        rate['S'] = fuzz.trimf(rate.universe, [0.8, 1.2, 2])
+        rate['H'] = fuzz.trapmf(rate.universe, [1.2, 2, np.inf, np.inf])
+        self.rate = rate
 
     def set_factor_membership(self):
-        # Fator de qualidade varia de 0 a 2, com precisão de 0.01
-        factor = ctrl.Consequent(np.arange(0, 2.05, 0.05), 'factor')
+        # Fator de qualidade varia de 0 a 2, com precisão de 0.05
         N2 = 0.25   # Reduzir - R
         N1 = 0.5    # Reduzir pouco - SR
         Z = 1       # Não alterar - NC
         P1 = 1.5    # Aumentar pouco - SI
         P2 = 2      # Aumentar - I
+        factor = ctrl.Consequent(np.arange(0, P2 + 0.55, 0.05), 'factor')
 
         # Fator de incremento/decremento da qualidade do próximo segmento
         factor['R'] = fuzz.trapmf(factor.universe, [0, 0, N2, N1])
         factor['SR'] = fuzz.trimf(factor.universe, [N2, N1, Z])
         factor['NC'] = fuzz.trimf(factor.universe, [N1, Z, P1])
         factor['SI'] = fuzz.trimf(factor.universe, [Z, P1, P2])
-        factor['I'] = fuzz.trimf(factor.universe, [P1, P2, 2])
+        factor['I'] = fuzz.trapmf(factor.universe, [P1, P2, np.inf, np.inf])
         self.factor = factor
 
     def set_controller_rules(self):
         # Buffer Dangerous
-        rule1 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.bit_rate['L'], self.factor['R'])
-        rule2 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.bit_rate['S'], self.factor['R'])
-        rule3 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.bit_rate['H'], self.factor['R'])
+        rule1 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.rate['L'], self.factor['R'])
+        rule2 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.rate['S'], self.factor['R'])
+        rule3 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['F'] & self.rate['H'], self.factor['R'])
 
-        rule4 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.bit_rate['L'], self.factor['R'])
-        rule5 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.bit_rate['S'], self.factor['SR'])
-        rule6 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.bit_rate['H'], self.factor['SR'])
+        rule4 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.rate['L'], self.factor['R'])
+        rule5 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.rate['S'], self.factor['SR'])
+        rule6 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['S'] & self.rate['H'], self.factor['SR'])
 
-        rule7 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.bit_rate['L'], self.factor['R'])
-        rule8 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.bit_rate['S'], self.factor['SR'])
-        rule9 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.bit_rate['H'], self.factor['SR'])
+        rule7 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.rate['L'], self.factor['R'])
+        rule8 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.rate['S'], self.factor['SR'])
+        rule9 = ctrl.Rule(self.buff_size['D'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['SR'])
 
         # Buffer Low
-        rule10 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.bit_rate['L'], self.factor['SR'])
-        rule11 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.bit_rate['S'], self.factor['NC'])
-        rule12 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.bit_rate['H'], self.factor['NC'])
+        rule10 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.rate['L'], self.factor['SR'])
+        rule11 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.rate['S'], self.factor['NC'])
+        rule12 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['F'] & self.rate['H'], self.factor['NC'])
 
-        rule13 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.bit_rate['L'], self.factor['NC'])
-        rule14 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.bit_rate['S'], self.factor['NC'])
-        rule15 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.bit_rate['H'], self.factor['NC'])
+        rule13 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.rate['L'], self.factor['NC'])
+        rule14 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.rate['S'], self.factor['NC'])
+        rule15 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['S'] & self.rate['H'], self.factor['NC'])
 
-        rule16 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.bit_rate['L'], self.factor['NC'])
-        rule17 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.bit_rate['S'], self.factor['NC'])
-        rule18 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.bit_rate['H'], self.factor['SI'])
+        rule16 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.rate['L'], self.factor['NC'])
+        rule17 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.rate['S'], self.factor['NC'])
+        rule18 = ctrl.Rule(self.buff_size['L'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['SI'])
 
         # Buffer Safe
-        rule19 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.bit_rate['L'], self.factor['SI'])
-        rule20 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.bit_rate['S'], self.factor['SI'])
-        rule21 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.bit_rate['H'], self.factor['I'])
+        rule19 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.rate['L'], self.factor['SI'])
+        rule20 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.rate['S'], self.factor['SI'])
+        rule21 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['F'] & self.rate['H'], self.factor['I'])
 
-        rule22 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.bit_rate['L'], self.factor['SI'])
-        rule23 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.bit_rate['S'], self.factor['SI'])
-        rule24 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.bit_rate['H'], self.factor['I'])
+        rule22 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.rate['L'], self.factor['SI'])
+        rule23 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.rate['S'], self.factor['SI'])
+        rule24 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['S'] & self.rate['H'], self.factor['I'])
 
-        rule25 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['R'] & self.bit_rate['H'], self.factor['I'])
-        rule26 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['R'] & self.bit_rate['H'], self.factor['I'])
+        rule25 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['I'])
+        rule26 = ctrl.Rule(self.buff_size['S'] & self.buff_size_diff['R'] & self.rate['H'], self.factor['I'])
 
         self.rules = [
             rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9,
