@@ -43,7 +43,7 @@ class R2A_FDASH(IR2A):
 
         if(len(pbt) > 1):
             self.update_troughputs()
-            avg_throughput = mean(x[0] for x in self.throughputs)
+            avg_throughput = mean(x[0] for x in self.throughputs) / 2
 
             print("-----------------------------------------")
 
