@@ -15,10 +15,9 @@ class R2A_FDASH_2(IR2A):
         self.request_time = 0
         self.current_qi_index = 0
         self.smooth_troughput = None
-        self.d = 30
 
-        self.buffer_sizes = [0]
-        self.buff_size_danger = 15
+        self.buff_sizes = [0]
+        self.buff_size_danger = 10
         self.buff_max = self.whiteboard.get_max_buffer_size()
 
         # Buffering size
@@ -46,31 +45,25 @@ class R2A_FDASH_2(IR2A):
         self.send_up(msg)
 
     def handle_segment_size_request(self, msg):
-        self.buffer_sizes.append(self.whiteboard.get_amount_video_to_play())
+        self.buff_sizes.append(self.whiteboard.get_amount_video_to_play())
         # pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
         # pbs = self.whiteboard.get_playback_buffer_size()
         # self.update_troughputs()
         # self.print_throughputs()
         # self.update_troughputs()
 
-        # self.print_buffer_times()
-        # self.print_buffer_sizes()
-        if len(self.throughputs) >= 10:
-            avg_throughput = mean(self.throughputs[-10:][0]) / 2
-        else:
-            avg_throughput = mean(self.throughputs[:][0]) / 2
-
+        avg_throughput = mean(self.throughputs[:][0])
         if self.smooth_troughput is None:
             self.smooth_troughput = self.throughputs[-1][0]
         self.smooth_troughput = 0.2 * self.smooth_troughput + 0.8 * avg_throughput
 
         current_buffer_size = self.whiteboard.get_amount_video_to_play()
-        buffering_size_diff = self.buffer_sizes[-1] - self.buffer_sizes[-2]
+        buffering_size_diff = self.buff_sizes[-1] - self.buff_sizes[-2]
         print("buffering_size_diff =", buffering_size_diff)
 
         self.FDASH.input['buff_size'] = current_buffer_size
         self.FDASH.input['buff_size_diff'] = buffering_size_diff
-        self.FDASH.input['rate'] = avg_throughput / self.qi[self.current_qi_index]
+        self.FDASH.input['rate'] = self.throughputs[-1][0] / self.qi[self.current_qi_index]
         self.FDASH.compute()
 
         factor = self.FDASH.output['factor']
@@ -82,16 +75,7 @@ class R2A_FDASH_2(IR2A):
         # Pegar a media dos k ultimos throughtputs e multiplicar por fator
         desired_quality_id = avg_throughput * factor
         print(f"DESIRED QUALITY ID: {int(desired_quality_id)} bps")
-
-        predicted_buff_size = current_buffer_size + (self.smooth_troughput / desired_quality_id) - 1
-
-        if desired_quality_id > current_quality_id:
-            if current_buffer_size <= self.buff_size_danger:
-                desired_quality_id = current_quality_id
-
-        if desired_quality_id < current_quality_id:
-            if(predicted_buff_size >= self.buff_max / 2):
-                desired_quality_id = current_quality_id
+        desired_quality_id = self.minimize_switch_rate(desired_quality_id, current_buffer_size)
 
         # Descobrir maior qualidade mais proximo da qualidade desejada
         for i in range(len(self.qi)):
@@ -116,6 +100,29 @@ class R2A_FDASH_2(IR2A):
         self.throughputs.append((msg.get_bit_length() / t, time.perf_counter()))
         self.send_up(msg)
 
+    def get_selected_qi(self, desired_quality_id):
+        selected_qi = self.qi[0]
+        for quality_id in self.qi:
+            if desired_quality_id >= quality_id:
+                selected_qi = quality_id
+            else:
+                break
+        return selected_qi
+
+    def minimize_switch_rate(self, desired_quality_id, current_buffer_size):
+        selected_qi = self.get_selected_qi(desired_quality_id)
+        buff_size_pred = current_buffer_size + (self.smooth_troughput / selected_qi - 1)
+        quality_id_prev = self.qi[self.current_qi_index]
+        buff_size_prev = self.buff_sizes[-1]
+
+        if selected_qi > quality_id_prev and buff_size_prev <= self.buff_size_danger:
+            return quality_id_prev
+
+        if selected_qi < quality_id_prev and buff_size_pred >= self.buff_max / 2:
+            return quality_id_prev
+
+        return desired_quality_id
+
     def print_throughputs(self):
         print("-----------------------------------------")
         print(f"THROUGHPUTS: {self.throughputs} >>>> LEN: {len(self.throughputs)}")
@@ -138,11 +145,6 @@ class R2A_FDASH_2(IR2A):
         if len(pbs) >= 1:
             print(f"AVG BUFFER SIZE: {int(mean(x[1] for x in pbs))}")
         print("-----------------------------------------")
-
-    def update_troughputs(self):
-        current_time = time.perf_counter()
-        while (current_time - self.throughputs[0][1] > self.d):
-            self.throughputs.pop(0)
 
     def set_buffering_size_membership(self):
         buff_size_danger = self.buff_size_danger
