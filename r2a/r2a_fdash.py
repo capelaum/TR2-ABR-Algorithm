@@ -12,7 +12,7 @@ class R2A_FDASH(IR2A):
         self.qi = []
         self.throughputs = []
         self.request_time = 0
-        self.current_qi_index = 5
+        self.current_qi_index = 0
 
         # Tempo usado para estimar throughput da conexão
         self.d = 60
