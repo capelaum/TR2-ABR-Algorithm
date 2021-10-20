@@ -14,17 +14,17 @@ class R2A_FDASH(IR2A):
         self.request_time = 0
         self.current_qi_index = 0
 
-        # Tempo usado para estimar throughput da conexão
+        # Tempo de estimativa do throughput da conexão
         self.d = 60
         # Tempo de buffering Alvo
         self.T = 35
-        # Buffering time distance
+        # Distancia do tempo de buffering atual para o alvo
         self.set_buffering_time_membership()
-        # Buffering time difference
+        # Diferença entre os ultimos 2 tempos de buffering
         self.set_buffering_time_diff_membership()
         # Diferença entre qualidades
         self.set_quality_diff_membership()
-        # Configura controlador
+        # Configura controlador FLC
         self.set_controller_rules()
         self.FDASHControl = ctrl.ControlSystem(self.rules)
         self.FDASH = ctrl.ControlSystemSimulation(self.FDASHControl)
@@ -43,7 +43,7 @@ class R2A_FDASH(IR2A):
 
         if(len(pbt) > 1):
             self.update_troughputs()
-            avg_throughput = mean(x[0] for x in self.throughputs)
+            avg_throughput = mean(t[0] for t in self.throughputs)
 
             print("-----------------------------------------")
 
@@ -93,7 +93,7 @@ class R2A_FDASH(IR2A):
         print("-----------------------------------------")
         print(f"THROUGHPUTS: {self.throughputs} >>>> LEN: {len(self.throughputs)}")
         if len(self.throughputs) >= 1:
-            print(f"AVG THROUGHPUT: {int(mean(self.throughputs[:][0]))} Mbps")
+            print(f"AVG THROUGHPUT: {int(mean(t[0] for t in self.throughputs))} Mbps")
         print("-----------------------------------------")
 
     def print_buffer_times(self):
@@ -109,7 +109,7 @@ class R2A_FDASH(IR2A):
         print("-----------------------------------------")
         print(f"BUFFER SIZES: {pbs} >>>> LEN: {len(pbs)}")
         if len(pbs) >= 1:
-            print(f"AVG BUFFER SIZE: {int(mean(x[1] for x in pbs))}")
+            print(f"AVG BUFFER SIZE: {int(mean(b[1] for b in pbs))}")
         print("-----------------------------------------")
 
     def update_troughputs(self):
