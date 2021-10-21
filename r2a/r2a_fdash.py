@@ -61,7 +61,8 @@ class R2A_FDASH(IR2A):
             desired_quality_id = avg_throughput * factor
 
             # Descobrir indice da maior qualidade mais proximo da qualidade desejada
-            self.current_qi_index = np.searchsorted(self.qi, desired_quality_id) - 1
+            selected_qi_index = np.searchsorted(self.qi, desired_quality_id) - 1
+            self.current_qi_index = selected_qi_index if selected_qi_index > 0 else 0
 
         # Nos primeiros segmentos, escolher a menor qualidade possível
         msg.add_quality_id(self.qi[self.current_qi_index])
@@ -131,11 +132,12 @@ class R2A_FDASH(IR2A):
         rule9 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['R'], self.quality_diff['I'])
         self.rules = [rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9]
 
-    def print_request_info(self, msg, factor, desired_quality_id):
+    def print_request_info(self, msg, avg_throughput, factor, desired_quality_id):
         print("-----------------------------------------")
         buffering_time = self.pbt[-1]
         buffering_time_diff = buffering_time - self.pbt[-2]
 
+        print("AVG Throughput = ", avg_throughput)
         print("buffering_time = ", buffering_time)
         print("buffering_time_diff = ", buffering_time_diff)
         print(">>>>> Fator de acréscimo/decréscimo =", factor)
@@ -147,7 +149,6 @@ class R2A_FDASH(IR2A):
         playback_pauses = self.whiteboard.get_playback_pauses()
         print("PAUSES:", len(playback_pauses))
         print("SEGMENT ID:", msg.get_segment_id())
-        print(f"CHOSEN QUALITY: {msg.get_quality_id()}bps")
         print("-----------------------------------------")
 
     def print_throughputs(self):
