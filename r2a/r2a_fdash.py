@@ -61,7 +61,7 @@ class R2A_FDASH(IR2A):
             desired_quality_id = avg_throughput * factor
 
             # Descobrir indice da maior qualidade mais proximo da qualidade desejada
-            selected_qi_index = np.searchsorted(self.qi, desired_quality_id) - 1
+            selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
             self.current_qi_index = selected_qi_index if selected_qi_index > 0 else 0
 
         # Nos primeiros segmentos, escolher a menor qualidade possível
