@@ -18,7 +18,7 @@ class R2A_FDASH_2(IR2A):
         self.d = 5
 
         self.buff_sizes = [0]
-        self.buff_size_danger = 20
+        self.buff_size_danger = 15
         self.buff_max = self.whiteboard.get_max_buffer_size()
 
         # Buffering size
