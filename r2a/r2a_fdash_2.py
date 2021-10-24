@@ -56,16 +56,14 @@ class R2A_FDASH_2(IR2A):
         self.smooth_troughput = 0.2 * self.smooth_troughput + 0.8 * avg_throughput
 
         if len(self.pbs) > 1:
-            current_buffer_size = self.whiteboard.get_amount_video_to_play()
-            buffering_size_diff = self.pbs[-1][1] - self.pbs[-2][1]
-            self.FDASH.input['buff_size'] = current_buffer_size
-            self.FDASH.input['buff_size_diff'] = buffering_size_diff
+            self.FDASH.input['buff_size'] = self.pbs[-1][1]
+            self.FDASH.input['buff_size_diff'] = self.pbs[-1][1] - self.pbs[-2][1]
             self.FDASH.input['rate'] = self.throughputs[-1][0] / self.qi[self.current_qi_index]
             self.FDASH.compute()
             factor = self.FDASH.output['factor']
 
             desired_quality_id = self.smooth_troughput * factor
-            desired_quality_id = self.minimize_switch_rate(desired_quality_id, current_buffer_size)
+            desired_quality_id = self.minimize_switch_rate(desired_quality_id)
 
             self.print_request_info(msg, avg_throughput, factor, desired_quality_id)
             # self.print_buffer_sizes()
@@ -97,17 +95,17 @@ class R2A_FDASH_2(IR2A):
                 break
         return selected_qi
 
-    def minimize_switch_rate(self, desired_quality_id, current_buffer_size):
+    def minimize_switch_rate(self, desired_quality_id):
         selected_qi = self.get_selected_qi(desired_quality_id)
-        buff_size_pred = current_buffer_size + (self.smooth_troughput / selected_qi - 1)
-        quality_id_prev = self.qi[self.current_qi_index]
-        buff_size_prev = self.pbs[-2][1]
+        pred_buff_size = self.pbs[-1][1] + (self.smooth_troughput / selected_qi - 1)
+        prev_quality_id = self.qi[self.current_qi_index]
+        prev_buff_size = self.pbs[-2][1]
 
-        if selected_qi > quality_id_prev and buff_size_prev <= self.buff_size_danger:
-            return quality_id_prev
+        if selected_qi > prev_quality_id and prev_buff_size <= self.buff_size_danger:
+            return prev_quality_id
 
-        # if selected_qi < quality_id_prev and buff_size_pred >= self.buff_max / 2:
-        #     return quality_id_prev
+        # if selected_qi < prev_quality_id and pred_buff_size >= self.buff_max / 2:
+        #     return prev_quality_id
 
         return desired_quality_id
 
@@ -203,6 +201,7 @@ class R2A_FDASH_2(IR2A):
         buff_size_diff = self.buff_size_diff
         rate = self.rate
         factor = self.factor
+
         # Buffer Dangerous
         rule1 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['L'], factor['R'])
         rule2 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['S'], factor['R'])

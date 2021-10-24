@@ -44,17 +44,13 @@ class R2A_FDASH(IR2A):
             self.update_troughputs()
             avg_throughput = mean(t[0] for t in self.throughputs)
 
-            # Pega o tempo de buffering atual
-            buffering_time = self.pbt[-1]
-            # Calcula a diferença entre os 2 ultimos tempos de buffering
-            buffering_time_diff = buffering_time - self.pbt[-2]
-
-            # Insere as variaveis de entrada no simulador FLC e computa o resultado
-            self.FDASH.input['buff_time'] = buffering_time
-            self.FDASH.input['buff_time_diff'] = buffering_time_diff
+            # Entrada: Tempo de buffering atual
+            self.FDASH.input['buff_time'] = self.pbt[-1]
+            # Entrada: Diferença entre os 2 ultimos tempos de buffering
+            self.FDASH.input['buff_time_diff'] = self.pbt[-1] - self.pbt[-2]
             self.FDASH.compute()
 
-            # Armazena o resultado calculado pelo simulador FLC
+            # Armazena o fator de saída calculado pelo simulador FLC
             factor = self.FDASH.output['quality_diff']
 
             # Media dos k ultimos throughtputs multiplicada por fator
