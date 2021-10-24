@@ -14,17 +14,17 @@ class R2A_FDASH(IR2A):
         self.request_time = 0
         self.current_qi_index = 0
 
-        # Tempo usado para estimar throughput da conexão
-        self.d = 60
+        # Tempo de estimativa do throughput da conexão
+        self.d = 5
         # Tempo de buffering Alvo
         self.T = 35
-        # Buffering time distance
+        # Distancia do tempo de buffering atual para o alvo
         self.set_buffering_time_membership()
-        # Buffering time difference
+        # Diferença entre os ultimos 2 tempos de buffering
         self.set_buffering_time_diff_membership()
         # Diferença entre qualidades
         self.set_quality_diff_membership()
-        # Configura controlador
+        # Configura controlador FLC
         self.set_controller_rules()
         self.FDASHControl = ctrl.ControlSystem(self.rules)
         self.FDASH = ctrl.ControlSystemSimulation(self.FDASHControl)
@@ -38,79 +38,42 @@ class R2A_FDASH(IR2A):
         self.send_up(msg)
 
     def handle_segment_size_request(self, msg):
-        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
-        pbs = self.whiteboard.get_playback_buffer_size()
+        self.pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
 
-        if(len(pbt) > 1):
+        if(len(self.pbt) > 1):
             self.update_troughputs()
-            avg_throughput = mean(x[0] for x in self.throughputs)
+            avg_throughput = mean(t[0] for t in self.throughputs)
 
-            print("-----------------------------------------")
+            # Pega o tempo de buffering atual
+            buffering_time = self.pbt[-1]
+            # Calcula a diferença entre os 2 ultimos tempos de buffering
+            buffering_time_diff = buffering_time - self.pbt[-2]
 
-            buffering_time = pbt[-1]
-            buffering_time_diff = buffering_time - pbt[-2]
-            print("buffering_time = ", buffering_time)
-            print("buffering_time_diff = ", buffering_time_diff)
-
+            # Insere as variaveis de entrada no simulador FLC e computa o resultado
             self.FDASH.input['buff_time'] = buffering_time
             self.FDASH.input['buff_time_diff'] = buffering_time_diff
             self.FDASH.compute()
 
+            # Armazena o resultado calculado pelo simulador FLC
             factor = self.FDASH.output['quality_diff']
-            print(">>>>> Fator de acréscimo/decréscimo =", factor)
 
-            current_quality_id = self.qi[self.current_qi_index]
-            print(f"CURRENT QUALITY ID: {current_quality_id}bps")
-
-            # Pegar a media dos k ultimos throughtputs e multiplicar por fator
+            # Media dos k ultimos throughtputs multiplicada por fator
             desired_quality_id = avg_throughput * factor
-            print(f"DESIRED QUALITY ID: {int(desired_quality_id)}bps")
 
-            # Descobrir maior qualidade mais proximo da qualidade desejada
-            for i in range(len(self.qi)):
-                if desired_quality_id >= self.qi[i]:
-                    self.current_qi_index = i
-                else:
-                    break
+            # Descobrir indice da maior qualidade mais proximo da qualidade desejada
+            selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
+            self.current_qi_index = selected_qi_index if selected_qi_index > 0 else 0
 
         # Nos primeiros segmentos, escolher a menor qualidade possível
         msg.add_quality_id(self.qi[self.current_qi_index])
-        playback_pauses = self.whiteboard.get_playback_pauses()
-        print("PAUSES:", len(playback_pauses))
-        print("SEGMENT ID:", msg.get_segment_id())
-        print(f"CHOSEN QUALITY: {msg.get_quality_id()}bps")
-        print("-----------------------------------------")
-
         self.request_time = time.perf_counter()
         self.send_down(msg)
 
     def handle_segment_size_response(self, msg):
         t = time.perf_counter() - self.request_time
-        self.throughputs.append((msg.get_bit_length() / t, time.perf_counter()))
+        throughput_tuple = (msg.get_bit_length() / t, time.perf_counter())
+        self.throughputs.append(throughput_tuple)
         self.send_up(msg)
-
-    def print_throughputs(self):
-        print("-----------------------------------------")
-        print(f"THROUGHPUTS: {self.throughputs} >>>> LEN: {len(self.throughputs)}")
-        if len(self.throughputs) >= 1:
-            print(f"AVG THROUGHPUT: {int(mean(self.throughputs[:][0]))} Mbps")
-        print("-----------------------------------------")
-
-    def print_buffer_times(self):
-        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
-        print("-----------------------------------------")
-        print(f"BUFFER TIMES: {pbt} >>>> LEN: {len(pbt)}")
-        if len(pbt) >= 1:
-            print(f"AVG BUFFER TIME: {int(mean(pbt))}s")
-        print("-----------------------------------------")
-
-    def print_buffer_sizes(self):
-        pbs = self.whiteboard.get_playback_buffer_size()
-        print("-----------------------------------------")
-        print(f"BUFFER SIZES: {pbs} >>>> LEN: {len(pbs)}")
-        if len(pbs) >= 1:
-            print(f"AVG BUFFER SIZE: {int(mean(x[1] for x in pbs))}")
-        print("-----------------------------------------")
 
     def update_troughputs(self):
         current_time = time.perf_counter()
@@ -138,14 +101,14 @@ class R2A_FDASH(IR2A):
         self.buff_time_diff = buff_time_diff
 
     def set_quality_diff_membership(self):
-        N2 = 0.25   # Reduzir - R
-        N1 = 0.5    # Reduzir pouco - SR
-        Z = 1       # Não alterar - NC
-        P1 = 1.5    # Aumentar pouco - SI
-        P2 = 2      # Aumentar - I
+        N2 = 0.25
+        N1 = 0.5
+        Z = 1
+        P1 = 1.5
+        P2 = 2
 
-        # Fator de qualidade varia de 0 a 2, com precisão de 0.01
-        quality_diff = ctrl.Consequent(np.arange(0, P2 + 0.5, 0.01), 'quality_diff')
+        # Fator de qualidade varia de 0 a 2.5
+        quality_diff = ctrl.Consequent(np.arange(0, P2+0.5, 0.01), 'quality_diff')
 
         # Fator de incremento/decremento da qualidade do próximo segmento
         quality_diff['R'] = fuzz.trapmf(quality_diff.universe, [0, 0, N2, N1])
@@ -168,6 +131,47 @@ class R2A_FDASH(IR2A):
         rule8 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['R'], self.quality_diff['SI'])
         rule9 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['R'], self.quality_diff['I'])
         self.rules = [rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9]
+
+    def print_request_info(self, msg, avg_throughput, factor, desired_quality_id):
+        print("-----------------------------------------")
+        buffering_time = self.pbt[-1]
+        buffering_time_diff = buffering_time - self.pbt[-2]
+
+        print("AVG Throughput = ", avg_throughput)
+        print("buffering_time = ", buffering_time)
+        print("buffering_time_diff = ", buffering_time_diff)
+        print(">>>>> Fator de acréscimo/decréscimo =", factor)
+
+        current_quality_id = self.qi[self.current_qi_index]
+        print(f"CURRENT QUALITY ID: {current_quality_id}bps")
+        print(f"DESIRED QUALITY ID: {int(desired_quality_id)}bps")
+
+        playback_pauses = self.whiteboard.get_playback_pauses()
+        print("PAUSES:", len(playback_pauses))
+        print("SEGMENT ID:", msg.get_segment_id())
+        print("-----------------------------------------")
+
+    def print_throughputs(self):
+        print("-----------------------------------------")
+        print(f"THROUGHPUTS: {self.throughputs} >>>> LEN: {len(self.throughputs)}")
+        if len(self.throughputs) >= 1:
+            print(f"AVG THROUGHPUT: {int(mean(t[0] for t in self.throughputs))} Mbps")
+        print("-----------------------------------------")
+
+    def print_buffer_times(self):
+        print("-----------------------------------------")
+        print(f"BUFFER TIMES: {self.pbt} >>>> LEN: {len(self.pbt)}")
+        if len(self.pbt) >= 1:
+            print(f"AVG BUFFER TIME: {int(mean(self.pbt))}s")
+        print("-----------------------------------------")
+
+    def print_buffer_sizes(self):
+        pbs = self.whiteboard.get_playback_buffer_size()
+        print("-----------------------------------------")
+        print(f"BUFFER SIZES: {pbs} >>>> LEN: {len(pbs)}")
+        if len(pbs) >= 1:
+            print(f"AVG BUFFER SIZE: {int(mean(b[1] for b in pbs))}")
+        print("-----------------------------------------")
 
     def initialize(self):
         pass
