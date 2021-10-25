@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+Grupo 9
+
+@author: Felipe Oliveira Magno Neves    - 16/0016296
+@author: Luís Vinicius Capelletto       - 16/0134544
+@author: Matheus Augusto Silva Pinho    - 18/0024906
+
+@description: FDASH algorithm: a Fuzzy-Based MPEG/DASH Adaption Algorithm
+"""
 from r2a.ir2a import IR2A
 from player.parser import *
 from statistics import mean
@@ -49,10 +59,8 @@ class R2A_FDASH(IR2A):
             # Entrada: Diferença entre os 2 ultimos tempos de buffering
             self.FDASH.input['buff_time_diff'] = self.pbt[-1] - self.pbt[-2]
             self.FDASH.compute()
-
             # Armazena o fator de saída calculado pelo simulador FLC
             factor = self.FDASH.output['quality_diff']
-
             # Media dos k ultimos throughtputs multiplicada por fator
             desired_quality_id = avg_throughput * factor
 

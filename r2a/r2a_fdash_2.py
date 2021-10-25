@@ -1,3 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+Grupo 9
+
+@author: Felipe Oliveira Magno Neves    - 16/0016296
+@author: Luís Vinicius Capelletto       - 16/0134544
+@author: Matheus Augusto Silva Pinho    - 18/0024906
+
+@description: FDASH Alternativo: Fuzzy-Based Quality Adaption Algorithm for improving QoE from
+MPEG/DASH Video
+"""
 from r2a.ir2a import IR2A
 from player.parser import *
 from statistics import mean
@@ -17,7 +28,6 @@ class R2A_FDASH_2(IR2A):
         self.smooth_troughput = None
         self.d = 5
 
-        self.buff_sizes = [0]
         self.buff_size_danger = 15
         self.buff_max = self.whiteboard.get_max_buffer_size()
 
@@ -47,7 +57,6 @@ class R2A_FDASH_2(IR2A):
 
     def handle_segment_size_request(self, msg):
         self.pbs = self.whiteboard.get_playback_buffer_size()
-        self.buff_sizes.append(self.whiteboard.get_amount_video_to_play())
         self.update_troughputs()
         avg_throughput = mean(t[0] for t in self.throughputs)
 
@@ -64,11 +73,9 @@ class R2A_FDASH_2(IR2A):
 
             desired_quality_id = self.smooth_troughput * factor
             desired_quality_id = self.minimize_switch_rate(desired_quality_id)
+            # self.print_request_info(msg, avg_throughput, factor, desired_quality_id)
 
-            self.print_request_info(msg, avg_throughput, factor, desired_quality_id)
-            # self.print_buffer_sizes()
-
-            # Descobrir indice da maior qualidade mais proximo da qualidade desejada
+            # Descobrir indice de maior qualidade mais proximo da qualidade desejada
             selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
             self.current_qi_index = selected_qi_index if selected_qi_index > 0 else 0
 
@@ -86,6 +93,14 @@ class R2A_FDASH_2(IR2A):
         while (current_time - self.throughputs[0][1] > self.d):
             self.throughputs.pop(0)
 
+    def minimize_switch_rate(self, desired_quality_id):
+        selected_qi = self.get_selected_qi(desired_quality_id)
+        prev_quality_id = self.qi[self.current_qi_index]
+        prev_buff_size = self.pbs[-2][1]
+        if selected_qi > prev_quality_id and prev_buff_size <= self.buff_size_danger:
+            return prev_quality_id
+        return desired_quality_id
+
     def get_selected_qi(self, desired_quality_id):
         selected_qi = self.qi[0]
         for quality_id in self.qi:
@@ -94,61 +109,6 @@ class R2A_FDASH_2(IR2A):
             else:
                 break
         return selected_qi
-
-    def minimize_switch_rate(self, desired_quality_id):
-        selected_qi = self.get_selected_qi(desired_quality_id)
-        pred_buff_size = self.pbs[-1][1] + (self.smooth_troughput / selected_qi - 1)
-        prev_quality_id = self.qi[self.current_qi_index]
-        prev_buff_size = self.pbs[-2][1]
-
-        if selected_qi > prev_quality_id and prev_buff_size <= self.buff_size_danger:
-            return prev_quality_id
-
-        # if selected_qi < prev_quality_id and pred_buff_size >= self.buff_max / 2:
-        #     return prev_quality_id
-
-        return desired_quality_id
-
-    def print_request_info(self, msg, avg_throughput, factor, desired_quality_id):
-        print("-----------------------------------------")
-        print("AVG Throughput =", avg_throughput)
-        print("SMOOTH Throughput =", self.smooth_troughput)
-        print("buffering_size =", self.pbs[-1][1])
-        print("buffering_size_diff =", self.pbs[-1][1] - self.pbs[-2][1])
-        print(">>>>> Fator de acréscimo/decréscimo =", factor)
-        print(f"CURRENT QUALITY ID: {self.qi[self.current_qi_index]}bps")
-        print(f"DESIRED QUALITY ID: {int(desired_quality_id)}bps")
-
-        playback_pauses = self.whiteboard.get_playback_pauses()
-        print("PAUSES:", len(playback_pauses))
-        print("SEGMENT ID:", msg.get_segment_id())
-        print("-----------------------------------------")
-
-    def print_throughputs(self):
-        print("-----------------------------------------")
-        print(f"THROUGHPUTS: {self.throughputs} >>>> LEN: {len(self.throughputs)}")
-        if len(self.throughputs) >= 1:
-            print(f"AVG THROUGHPUT: {int(mean(t[0] for t in self.throughputs))} Mbps")
-        print("-----------------------------------------")
-
-    def print_buffer_times(self):
-        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
-        print("-----------------------------------------")
-        print(f"BUFFER TIMES: {pbt} >>>> LEN: {len(pbt)}")
-        if len(pbt) >= 1:
-            print(f"AVG BUFFER TIME: {int(mean(pbt))}s")
-        print("-----------------------------------------")
-
-    def print_buffer_sizes(self):
-        print("-----------------------------------------")
-        print(f"BUFFER SIZES: {self.pbs} >>>> LEN: {len(self.pbs)}")
-        if len(self.pbs) >= 1:
-            print(f"AVG BUFFER SIZE: {int(mean(b[1] for b in self.pbs))}")
-        print("-----------------------------------------")
-        print(f"MY BUFFER SIZES: {self.buff_sizes} >>>> LEN: {len(self.buff_sizes)}")
-        if len(self.buff_sizes) >= 1:
-            print(f"MY AVG BUFFER SIZE: {int(mean(self.buff_sizes))}")
-        print("-----------------------------------------")
 
     def set_buffering_size_membership(self):
         buff_size_danger = self.buff_size_danger
@@ -246,6 +206,43 @@ class R2A_FDASH_2(IR2A):
             rule10, rule11, rule12, rule13, rule14, rule15, rule16, rule17, rule18,
             rule19, rule20, rule21, rule22, rule23, rule24, rule25, rule26, rule27
         ]
+
+    def print_request_info(self, msg, avg_throughput, factor, desired_quality_id):
+        print("-----------------------------------------")
+        print("AVG Throughput =", avg_throughput)
+        print("SMOOTH Throughput =", self.smooth_troughput)
+        print("buffering_size =", self.pbs[-1][1])
+        print("buffering_size_diff =", self.pbs[-1][1] - self.pbs[-2][1])
+        print(">>>>> Fator de acréscimo/decréscimo =", factor)
+        print(f"CURRENT QUALITY ID: {self.qi[self.current_qi_index]}bps")
+        print(f"DESIRED QUALITY ID: {int(desired_quality_id)}bps")
+
+        playback_pauses = self.whiteboard.get_playback_pauses()
+        print("PAUSES:", len(playback_pauses))
+        print("SEGMENT ID:", msg.get_segment_id())
+        print("-----------------------------------------")
+
+    def print_throughputs(self):
+        print("-----------------------------------------")
+        print(f"THROUGHPUTS: {self.throughputs} >>>> LEN: {len(self.throughputs)}")
+        if len(self.throughputs) >= 1:
+            print(f"AVG THROUGHPUT: {int(mean(t[0] for t in self.throughputs))} Mbps")
+        print("-----------------------------------------")
+
+    def print_buffer_times(self):
+        pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
+        print("-----------------------------------------")
+        print(f"BUFFER TIMES: {pbt} >>>> LEN: {len(pbt)}")
+        if len(pbt) >= 1:
+            print(f"AVG BUFFER TIME: {int(mean(pbt))}s")
+        print("-----------------------------------------")
+
+    def print_buffer_sizes(self):
+        print("-----------------------------------------")
+        print(f"BUFFER SIZES: {self.pbs} >>>> LEN: {len(self.pbs)}")
+        if len(self.pbs) >= 1:
+            print(f"AVG BUFFER SIZE: {int(mean(b[1] for b in self.pbs))}")
+        print("-----------------------------------------")
 
     def initialize(self):
         pass
