@@ -15,7 +15,7 @@ class R2A_FDASH(IR2A):
         self.current_qi_index = 0
 
         # Tempo de estimativa do throughput da conexão
-        self.d = 60
+        self.d = 5
         # Tempo de buffering Alvo
         self.T = 35
         # Distancia do tempo de buffering atual para o alvo
