@@ -9,13 +9,13 @@ Grupo 9
 @description: FDASH Alternativo: Fuzzy-Based Quality Adaption Algorithm for improving QoE from
 MPEG/DASH Video
 """
+import time
+import numpy as np
+import skfuzzy as fuzz
 from r2a.ir2a import IR2A
 from player.parser import *
 from statistics import mean
 from skfuzzy import control as ctrl
-import time
-import numpy as np
-import skfuzzy as fuzz
 
 
 class R2A_FDASH_2(IR2A):
