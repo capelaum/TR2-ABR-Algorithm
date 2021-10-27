@@ -1,13 +1,12 @@
-## ABR algorithm implementation
+## A fuzzy based ABR algorithm implementation
 
-Developed for educational purposes in the Teleinformatic and Networks 2 discipline of the 
-Computer Enginnering graduate course in University of Brasilia (UnB) - 2021-1.
+Developed in the Teleinformatic and Networks 2 discipline of the Computer Engineering bachelor degree in University of Brasilia (UnB) - 2021-1.
 
-This project uses [pydash project](https://github.com/mfcaetano/pydash)
+This project uses the [pydash project](https://github.com/mfcaetano/pydash)
 
 ## pyDash: A Framework Based Educational Tool for Adaptive Streaming Video Algorithms Study
 
-![bigbuckbunny](https://user-images.githubusercontent.com/4336448/118493151-2b9fc380-b6f7-11eb-8a25-9134862da754.jpg) A Python Dash Project. 
+![bigbuckbunny](https://user-images.githubusercontent.com/4336448/118493151-2b9fc380-b6f7-11eb-8a25-9134862da754.jpg) A Python Dash Project.
 
 PyDash is a framework for the development of adaptive streaming video algorithms. It is a learning tool designed to abstract the networking communication details, allowing e-students to focus exclusively on developing and evaluating ABR protocols.
 
@@ -15,7 +14,7 @@ PyDash is a framework for the development of adaptive streaming video algorithms
 
 We are from the **Department of Computer Science** at the **University of Brasília (UnB)**, Brazil.
 
-This project is leaded by [Prof. Dr. Marcos Caetano](mailto:mfcaetano@unb.br) and [Prof. Dr. Marcelo Marotta](mailto:marcelo.marotta@unb.br). 
+This project is leaded by [Prof. Dr. Marcos Caetano](mailto:mfcaetano@unb.br) and [Prof. Dr. Marcelo Marotta](mailto:marcelo.marotta@unb.br).
 
 If you have any questions regarding the pyDash project, please drop us an email.
 
@@ -24,7 +23,7 @@ If you have any questions regarding the pyDash project, please drop us an email.
 
 ## Pré-requisitos
 
-Para a utilização deste projeto é necessária a instalação de alguns pacotes python descritos no arquivo [requirements.txt](requirements.txt). 
+Para a utilização deste projeto é necessária a instalação de alguns pacotes python descritos no arquivo [requirements.txt](requirements.txt).
 
 ## Por onde eu começo?
 
@@ -64,7 +63,7 @@ Pronto! Para testar o código, basta executar:
 python3 main.py
 ```
 
-# Arquitetura 
+# Arquitetura
 
 ![Arquitetura](https://user-images.githubusercontent.com/4336448/98450304-85a54800-211a-11eb-93f7-fd4e60c46ed5.png)
 

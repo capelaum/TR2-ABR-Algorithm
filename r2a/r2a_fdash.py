@@ -8,13 +8,14 @@ Grupo 9
 
 @description: FDASH algorithm: a Fuzzy-Based MPEG/DASH Adaption Algorithm
 """
+import time
+import numpy as np
+import skfuzzy as fuzz
 from r2a.ir2a import IR2A
 from player.parser import *
 from statistics import mean
 from skfuzzy import control as ctrl
-import time
-import numpy as np
-import skfuzzy as fuzz
+
 
 class R2A_FDASH(IR2A):
     def __init__(self, id):
@@ -54,19 +55,13 @@ class R2A_FDASH(IR2A):
             self.update_troughputs()
             avg_throughput = mean(t[0] for t in self.throughputs)
 
-            # Pega o tempo de buffering atual
-            buffering_time = self.pbt[-1]
-            # Calcula a diferença entre os 2 ultimos tempos de buffering
-            buffering_time_diff = buffering_time - self.pbt[-2]
-
-            # Insere as variaveis de entrada no simulador FLC e computa o resultado
-            self.FDASH.input['buff_time'] = buffering_time
-            self.FDASH.input['buff_time_diff'] = buffering_time_diff
+            # Entrada: Tempo de buffering atual
+            self.FDASH.input['buff_time'] = self.pbt[-1]
+            # Entrada: Diferença entre os 2 ultimos tempos de buffering
+            self.FDASH.input['buff_time_diff'] = self.pbt[-1] - self.pbt[-2]
             self.FDASH.compute()
-
-            # Armazena o resultado calculado pelo simulador FLC
+            # Armazena o fator de saída calculado pelo simulador FLC
             factor = self.FDASH.output['quality_diff']
-
             # Media dos k ultimos throughtputs multiplicada por fator
             desired_quality_id = avg_throughput * factor
 
@@ -104,7 +99,7 @@ class R2A_FDASH(IR2A):
         T = self.T
         buff_time_diff = ctrl.Antecedent(np.arange(-T, 5*T+0.01, 0.01), 'buff_time_diff')
 
-        # Diferencial da taxa de transferência entre os 2 ultimos tempos de buffering
+        # Diferencial dos ultimos 2 tempos de buffering
         buff_time_diff['F'] = fuzz.trapmf(buff_time_diff.universe, [-T, -T, (-2*T/3), 0])
         buff_time_diff['S'] = fuzz.trimf(buff_time_diff.universe, [(-2*T/3), 0, 4*T])
         buff_time_diff['R'] = fuzz.trapmf(buff_time_diff.universe, [0, 4*T, np.inf,np.inf])
