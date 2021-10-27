@@ -16,6 +16,7 @@ from player.parser import *
 from statistics import mean
 from skfuzzy import control as ctrl
 
+
 class R2A_FDASH(IR2A):
     def __init__(self, id):
         IR2A.__init__(self, id)
