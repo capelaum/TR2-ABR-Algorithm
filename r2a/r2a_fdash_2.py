@@ -26,8 +26,8 @@ class R2A_FDASH_2(IR2A):
         self.request_time = 0
         self.current_qi_index = 0
         self.smooth_troughput = None
+        self.rules = []
         self.d = 5
-
         self.buff_size_danger = 15
         self.buff_max = self.whiteboard.get_max_buffer_size()
 
@@ -73,11 +73,10 @@ class R2A_FDASH_2(IR2A):
 
             desired_quality_id = self.smooth_troughput * factor
             desired_quality_id = self.minimize_switch_rate(desired_quality_id)
-            # self.print_request_info(msg, avg_throughput, factor, desired_quality_id)
+            self.print_request_info(msg, avg_throughput, factor, desired_quality_id)
 
             # Descobrir indice de maior qualidade mais proximo da qualidade desejada
-            selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
-            self.current_qi_index = selected_qi_index if selected_qi_index > 0 else 0
+            self.current_qi_index = self.get_selected_qi(desired_quality_id, True)
 
         msg.add_quality_id(self.qi[self.current_qi_index])
         self.request_time = time.perf_counter()
@@ -96,19 +95,23 @@ class R2A_FDASH_2(IR2A):
     def minimize_switch_rate(self, desired_quality_id):
         selected_qi = self.get_selected_qi(desired_quality_id)
         prev_quality_id = self.qi[self.current_qi_index]
+        current_buff_size = self.pbs[-1][1]
         prev_buff_size = self.pbs[-2][1]
+        predicted_buff = current_buff_size + (self.smooth_troughput / selected_qi - 1)
+
         if selected_qi > prev_quality_id and prev_buff_size <= self.buff_size_danger:
             return prev_quality_id
+        if selected_qi < prev_quality_id and predicted_buff >= 0.5 * self.buff_max:
+            return prev_quality_id
+
         return desired_quality_id
 
-    def get_selected_qi(self, desired_quality_id):
-        selected_qi = self.qi[0]
-        for quality_id in self.qi:
-            if desired_quality_id >= quality_id:
-                selected_qi = quality_id
-            else:
-                break
-        return selected_qi
+    def get_selected_qi(self, desired_quality_id, get_index=False):
+        selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
+        if get_index:
+            return selected_qi_index if selected_qi_index > 0 else 0
+
+        return self.qi[selected_qi_index] if selected_qi_index > 0 else self.qi[0]
 
     def set_buffering_size_membership(self):
         buff_size_danger = self.buff_size_danger
@@ -156,6 +159,10 @@ class R2A_FDASH_2(IR2A):
         factor['I'] = fuzz.trapmf(factor.universe, [P1, P2, np.inf, np.inf])
         self.factor = factor
 
+    def set_rule(self, rule, output):
+        rule = ctrl.Rule(rule, output)
+        self.rules.append(rule)
+
     def set_controller_rules(self):
         buff_size = self.buff_size
         buff_size_diff = self.buff_size_diff
@@ -163,49 +170,43 @@ class R2A_FDASH_2(IR2A):
         factor = self.factor
 
         # Buffer Dangerous
-        rule1 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['L'], factor['R'])
-        rule2 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['S'], factor['R'])
-        rule3 = ctrl.Rule(buff_size['D'] & buff_size_diff['F'] & rate['H'], factor['R'])
+        self.set_rule(buff_size['D'] & buff_size_diff['F'] & rate['L'], factor['R'])
+        self.set_rule(buff_size['D'] & buff_size_diff['F'] & rate['S'], factor['R'])
+        self.set_rule(buff_size['D'] & buff_size_diff['F'] & rate['H'], factor['R'])
 
-        rule4 = ctrl.Rule(buff_size['D'] & buff_size_diff['S'] & rate['L'], factor['R'])
-        rule5 = ctrl.Rule(buff_size['D'] & buff_size_diff['S'] & rate['S'], factor['SR'])
-        rule6 = ctrl.Rule(buff_size['D'] & buff_size_diff['S'] & rate['H'], factor['SR'])
+        self.set_rule(buff_size['D'] & buff_size_diff['S'] & rate['L'], factor['R'])
+        self.set_rule(buff_size['D'] & buff_size_diff['S'] & rate['S'], factor['SR'])
+        self.set_rule(buff_size['D'] & buff_size_diff['S'] & rate['H'], factor['SR'])
 
-        rule7 = ctrl.Rule(buff_size['D'] & buff_size_diff['R'] & rate['L'], factor['R'])
-        rule8 = ctrl.Rule(buff_size['D'] & buff_size_diff['R'] & rate['S'], factor['SR'])
-        rule9 = ctrl.Rule(buff_size['D'] & buff_size_diff['R'] & rate['H'], factor['SR'])
+        self.set_rule(buff_size['D'] & buff_size_diff['R'] & rate['L'], factor['R'])
+        self.set_rule(buff_size['D'] & buff_size_diff['R'] & rate['S'], factor['SR'])
+        self.set_rule(buff_size['D'] & buff_size_diff['R'] & rate['H'], factor['SR'])
 
         # Buffer Low
-        rule10 = ctrl.Rule(buff_size['L'] & buff_size_diff['F'] & rate['L'], factor['SR'])
-        rule11 = ctrl.Rule(buff_size['L'] & buff_size_diff['F'] & rate['S'], factor['NC'])
-        rule12 = ctrl.Rule(buff_size['L'] & buff_size_diff['F'] & rate['H'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['F'] & rate['L'], factor['SR'])
+        self.set_rule(buff_size['L'] & buff_size_diff['F'] & rate['S'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['F'] & rate['H'], factor['NC'])
 
-        rule13 = ctrl.Rule(buff_size['L'] & buff_size_diff['S'] & rate['L'], factor['NC'])
-        rule14 = ctrl.Rule(buff_size['L'] & buff_size_diff['S'] & rate['S'], factor['NC'])
-        rule15 = ctrl.Rule(buff_size['L'] & buff_size_diff['S'] & rate['H'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['S'] & rate['L'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['S'] & rate['S'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['S'] & rate['H'], factor['NC'])
 
-        rule16 = ctrl.Rule(buff_size['L'] & buff_size_diff['R'] & rate['L'], factor['NC'])
-        rule17 = ctrl.Rule(buff_size['L'] & buff_size_diff['R'] & rate['S'], factor['NC'])
-        rule18 = ctrl.Rule(buff_size['L'] & buff_size_diff['R'] & rate['H'], factor['SI'])
+        self.set_rule(buff_size['L'] & buff_size_diff['R'] & rate['L'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['R'] & rate['S'], factor['NC'])
+        self.set_rule(buff_size['L'] & buff_size_diff['R'] & rate['H'], factor['SI'])
 
         # Buffer Safe
-        rule19 = ctrl.Rule(buff_size['S'] & buff_size_diff['F'] & rate['L'], factor['SI'])
-        rule20 = ctrl.Rule(buff_size['S'] & buff_size_diff['F'] & rate['S'], factor['SI'])
-        rule21 = ctrl.Rule(buff_size['S'] & buff_size_diff['F'] & rate['H'], factor['I'])
+        self.set_rule(buff_size['S'] & buff_size_diff['F'] & rate['L'], factor['SI'])
+        self.set_rule(buff_size['S'] & buff_size_diff['F'] & rate['S'], factor['SI'])
+        self.set_rule(buff_size['S'] & buff_size_diff['F'] & rate['H'], factor['I'])
 
-        rule22 = ctrl.Rule(buff_size['S'] & buff_size_diff['S'] & rate['L'], factor['SI'])
-        rule23 = ctrl.Rule(buff_size['S'] & buff_size_diff['S'] & rate['S'], factor['SI'])
-        rule24 = ctrl.Rule(buff_size['S'] & buff_size_diff['S'] & rate['H'], factor['I'])
+        self.set_rule(buff_size['S'] & buff_size_diff['S'] & rate['L'], factor['SI'])
+        self.set_rule(buff_size['S'] & buff_size_diff['S'] & rate['S'], factor['SI'])
+        self.set_rule(buff_size['S'] & buff_size_diff['S'] & rate['H'], factor['I'])
 
-        rule25 = ctrl.Rule(buff_size['S'] & buff_size_diff['R'] & rate['L'], factor['SI'])
-        rule26 = ctrl.Rule(buff_size['S'] & buff_size_diff['R'] & rate['S'], factor['I'])
-        rule27 = ctrl.Rule(buff_size['S'] & buff_size_diff['R'] & rate['H'], factor['I'])
-
-        self.rules = [
-            rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9,
-            rule10, rule11, rule12, rule13, rule14, rule15, rule16, rule17, rule18,
-            rule19, rule20, rule21, rule22, rule23, rule24, rule25, rule26, rule27
-        ]
+        self.set_rule(buff_size['S'] & buff_size_diff['R'] & rate['L'], factor['SI'])
+        self.set_rule(buff_size['S'] & buff_size_diff['R'] & rate['S'], factor['I'])
+        self.set_rule(buff_size['S'] & buff_size_diff['R'] & rate['H'], factor['I'])
 
     def print_request_info(self, msg, avg_throughput, factor, desired_quality_id):
         print("-----------------------------------------")

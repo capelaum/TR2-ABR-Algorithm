@@ -24,7 +24,14 @@ class R2A_FDASH(IR2A):
         self.throughputs = []
         self.request_time = 0
         self.current_qi_index = 0
+        self.smooth_troughput = None
 
+        # Tamanhos de buffer
+        self.buff_size_danger = 15
+        self.buff_max = self.whiteboard.get_max_buffer_size()
+
+        # Conjunto de regras
+        self.rules = []
         # Tempo de estimativa do throughput da conexão
         self.d = 5
         # Tempo de buffering Alvo
@@ -49,11 +56,17 @@ class R2A_FDASH(IR2A):
         self.send_up(msg)
 
     def handle_segment_size_request(self, msg):
+        self.pbs = self.whiteboard.get_playback_buffer_size()
         self.pbt = self.whiteboard.get_playback_segment_size_time_at_buffer()
 
         if(len(self.pbt) > 1):
             self.update_troughputs()
             avg_throughput = mean(t[0] for t in self.throughputs)
+
+            # Smooth trhoughput
+            if self.smooth_troughput is None:
+                self.smooth_troughput = avg_throughput
+            self.smooth_troughput = 0.2 * self.smooth_troughput + 0.8 * avg_throughput
 
             # Entrada: Tempo de buffering atual
             self.FDASH.input['buff_time'] = self.pbt[-1]
@@ -63,11 +76,13 @@ class R2A_FDASH(IR2A):
             # Armazena o fator de saída calculado pelo simulador FLC
             factor = self.FDASH.output['quality_diff']
             # Media dos k ultimos throughtputs multiplicada por fator
-            desired_quality_id = avg_throughput * factor
+            desired_quality_id = self.smooth_troughput * factor
+            desired_quality_id = self.minimize_switch_rate(desired_quality_id)
+
+            self.print_request_info(msg, avg_throughput, factor, desired_quality_id)
 
             # Descobrir indice da maior qualidade mais proximo da qualidade desejada
-            selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
-            self.current_qi_index = selected_qi_index if selected_qi_index > 0 else 0
+            self.current_qi_index = self.get_selected_qi(desired_quality_id, True)
 
         # Nos primeiros segmentos, escolher a menor qualidade possível
         msg.add_quality_id(self.qi[self.current_qi_index])
@@ -84,6 +99,27 @@ class R2A_FDASH(IR2A):
         current_time = time.perf_counter()
         while (current_time - self.throughputs[0][1] > self.d):
             self.throughputs.pop(0)
+
+    def minimize_switch_rate(self, desired_quality_id):
+        selected_qi = self.get_selected_qi(desired_quality_id)
+        prev_quality_id = self.qi[self.current_qi_index]
+        current_buff_size = self.pbs[-1][1]
+        prev_buff_size = self.pbs[-2][1]
+        predicted_buff = current_buff_size + (self.smooth_troughput / selected_qi) - 1
+
+        if selected_qi > prev_quality_id and prev_buff_size <= self.buff_size_danger:
+            return prev_quality_id
+        if selected_qi < prev_quality_id and predicted_buff >= 0.5 * self.buff_max:
+            return prev_quality_id
+
+        return desired_quality_id
+
+    def get_selected_qi(self, desired_quality_id, get_index=False):
+        selected_qi_index = np.searchsorted(self.qi, desired_quality_id, side='right') - 1
+        if get_index:
+            return selected_qi_index if selected_qi_index > 0 else 0
+
+        return self.qi[selected_qi_index] if selected_qi_index > 0 else self.qi[0]
 
     def set_buffering_time_membership(self):
         T = self.T
@@ -123,19 +159,22 @@ class R2A_FDASH(IR2A):
         quality_diff['I'] = fuzz.trapmf(quality_diff.universe, [P1, P2, np.inf,np.inf])
         self.quality_diff = quality_diff
 
+    def set_rule(self, rule, output):
+        rule = ctrl.Rule(rule, output)
+        self.rules.append(rule)
+
     def set_controller_rules(self):
-        rule1 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['F'], self.quality_diff['R'])
-        rule2 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['F'], self.quality_diff['SR'])
-        rule3 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['F'], self.quality_diff['NC'])
+        self.set_rule(self.buff_time['S'] & self.buff_time_diff['F'], self.quality_diff['R'])
+        self.set_rule(self.buff_time['C'] & self.buff_time_diff['F'], self.quality_diff['SR'])
+        self.set_rule(self.buff_time['L'] & self.buff_time_diff['F'], self.quality_diff['NC'])
 
-        rule4 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['S'], self.quality_diff['SR'])
-        rule5 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['S'], self.quality_diff['NC'])
-        rule6 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['S'], self.quality_diff['SI'])
+        self.set_rule(self.buff_time['S'] & self.buff_time_diff['S'], self.quality_diff['SR'])
+        self.set_rule(self.buff_time['C'] & self.buff_time_diff['S'], self.quality_diff['NC'])
+        self.set_rule(self.buff_time['L'] & self.buff_time_diff['S'], self.quality_diff['SI'])
 
-        rule7 = ctrl.Rule(self.buff_time['S'] & self.buff_time_diff['R'], self.quality_diff['NC'])
-        rule8 = ctrl.Rule(self.buff_time['C'] & self.buff_time_diff['R'], self.quality_diff['SI'])
-        rule9 = ctrl.Rule(self.buff_time['L'] & self.buff_time_diff['R'], self.quality_diff['I'])
-        self.rules = [rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9]
+        self.set_rule(self.buff_time['S'] & self.buff_time_diff['R'], self.quality_diff['NC'])
+        self.set_rule(self.buff_time['C'] & self.buff_time_diff['R'], self.quality_diff['SI'])
+        self.set_rule(self.buff_time['L'] & self.buff_time_diff['R'], self.quality_diff['I'])
 
     def print_request_info(self, msg, avg_throughput, factor, desired_quality_id):
         print("-----------------------------------------")
